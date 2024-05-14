@@ -28,7 +28,7 @@ class HFLMMultiExit(gpt2.HFLM):
     """
     def __init__(
         self,
-        device="cuda",
+        device="mps",
         pretrained="gpt2-medium",
         revision="main",
         subfolder=None,
@@ -43,7 +43,7 @@ class HFLMMultiExit(gpt2.HFLM):
         assert isinstance(batch_size, int)
 
         if device:
-            if device not in ["cuda", "cpu"]:
+            if device not in ["cuda", "cpu", "mps"]:
                 device = int(device)
             self._device = torch.device(device)
             print(f"Using device '{device}'")
@@ -53,7 +53,7 @@ class HFLMMultiExit(gpt2.HFLM):
             self._device = (
                 torch.device("cuda")
                 if torch.cuda.is_available()
-                else torch.device("cpu")
+                else torch.device("mps")
             )
 
         revision = revision + ("/" + subfolder if subfolder is not None else "")

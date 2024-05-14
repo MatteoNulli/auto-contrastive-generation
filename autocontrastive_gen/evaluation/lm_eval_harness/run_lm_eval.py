@@ -59,6 +59,8 @@ def parse_args():
     parser.add_argument("--decontamination_ngrams_path", default=None)
     parser.add_argument("--description_dict_path", default=None)
     parser.add_argument("--check_integrity", action="store_true")
+    # parser.add_argument("--exit_conf_type", type=str, default="softmax")
+    # parser.add_argument("--early_exit", default=False)
 
     return parser.parse_args()
 
@@ -107,6 +109,7 @@ def main():
         description_dict=description_dict,
         decontamination_ngrams_path=args.decontamination_ngrams_path,
         check_integrity=args.check_integrity,
+        # early_exit==args.early_exit,
     )
 
     dumped = json.dumps(results, indent=2)

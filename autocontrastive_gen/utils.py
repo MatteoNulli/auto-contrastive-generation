@@ -20,7 +20,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausa
 from autocontrastive_gen.data_processing.dataset_catalog import DatasetsCatalog
 from autocontrastive_gen.modeling.auto_model import AutoMultiExitModel
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'mps'
 
 
 def get_model(model_name_or_path, multi_exit_config, vanilla_model: bool = False):

@@ -6,6 +6,7 @@ import torch
 from torch import nn
 
 from autocontrastive_gen.modeling.configuration import VocabularyProjectionMode
+from autocontrastive_gen.contrast_calculation import calculate_contrasted_logits_softmax, calculate_contrasted_logits_JSD, calculate_contrasted_logits
 
 
 class MultiExitModel:
@@ -92,6 +93,45 @@ class MultiExitModel:
                 if param.requires_grad:
                     print(name)
 
+    def _calculate_early_exit_outputs(self, original_exit_output: torch.FloatTensor,
+                                       all_hidden_states: tuple[torch.FloatTensor]) -> dict[Union[int, str],
+                                                                                          torch.FloatTensor]:
+        device = original_exit_output.device
+
+        index_to_layer_lm_logits = {}
+         
+        if self.vocab_projection_mode == VocabularyProjectionMode.LAYER_SPECIFIC_PROJECTION:
+            for head_name, layer_lm_head in self.name_to_lm_exit_head.items():
+                if head_name == 'lm_head_original':
+                    index_to_layer_lm_logits['original'] = original_exit_output
+                else:
+                    #if calculate_contrasted_logits_softmax: 
+                    layer_index = int(head_name.split(self.lm_head_name_prefix)[-1])
+                    is_last_layer = layer_index == self.num_layers
+                    layer_outputs = self.normalize_layer_output(all_hidden_states[layer_index], is_last_layer)
+                    layer_outputs = layer_lm_head.to(device)(layer_outputs) if self.apply_lm_head \
+                        else layer_outputs
+                    
+                    if self.config.exit_conf_type == "softmax":
+                        skip_mask = calculate_contrasted_logits_softmax(layer_outputs, config=self.config)
+                    elif self.config.exit_conf_type == "JDS":
+                        skip_mask = calculate_contrasted_logits_JSD(layer_outputs, config=self.config)
+                    else:
+                        raise Exception(f"Contrastive function {self.config.exit_conf_type} not supported")
+                    
+                    print("Are we early exiting?", skip_mask.item() == 1)
+                    index_to_layer_lm_logits[layer_index] = layer_outputs
+                    if skip_mask:
+                        break # early exit
+                                
+        elif self.vocab_projection_mode == VocabularyProjectionMode.SHARED_PROJECTION_CAST_OUTPUTS:
+            pass
+
+        elif self.vocab_projection_mode == VocabularyProjectionMode.SHARED_PROJECTION_DIRECT:
+            pass
+
+        return index_to_layer_lm_logits
+    
     def _calculate_all_layer_outputs(self, original_exit_output: torch.FloatTensor,
                                      all_hidden_states: tuple[torch.FloatTensor]) -> dict[Union[int, str],
                                                                                           torch.FloatTensor]:
@@ -146,7 +186,13 @@ class MultiExitModel:
             lm_logits_upper = original_exit_output if self.contrast_layer_indices[0] == 'original' \
                 else index_to_layer_lm_logits[self.contrast_layer_indices[0]]
             lm_logits_lower = index_to_layer_lm_logits[self.contrast_layer_indices[1]]
-            output_logits = self.contrast_function(lm_logits_upper, lm_logits_lower)
+            # self.exit_conf_type = getattr(self.config, self.exit_conf_type)
+            # if self.config.exit_conf_type == "softmax":
+            #     self.contrast_function = calculate_contrasted_logits_softmax
+            # elif self.config.exit_conf_type == "JDS":
+            #     self.contrast_function = calculate_contrasted_logits_JSD
+
+            output_logits = self.contrast_function(lm_logits_upper, lm_logits_lower, config=self.config)
         return output_logits
 
     def _forward(self, *args, **kwargs):
@@ -156,8 +202,12 @@ class MultiExitModel:
         outputs = super().forward(*args, **kwargs)
 
         all_hidden_states = outputs.decoder_hidden_states if self.config.is_encoder_decoder else outputs.hidden_states
-        index_to_layer_lm_logits = self._calculate_all_layer_outputs(original_exit_output=outputs.logits,
-                                                                     all_hidden_states=all_hidden_states)
+        if self.config.early_exit:
+            index_to_layer_lm_logits = self._calculate_early_exit_outputs(original_exit_output=outputs.logits,
+                                                                          all_hidden_states=all_hidden_states)
+        else:
+            index_to_layer_lm_logits = self._calculate_all_layer_outputs(original_exit_output=outputs.logits,
+                                                                        all_hidden_states=all_hidden_states)
 
         outputs.logits = self._calculate_model_output(original_exit_output=outputs.logits,
                                                       index_to_layer_lm_logits=index_to_layer_lm_logits)
